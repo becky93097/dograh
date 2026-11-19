@@ -3,9 +3,16 @@
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
-from api.schemas.llm_fallback import FallbackPolicy
+from api.schemas.llm_fallback import FallbackPolicy, TTSFallbackPolicy
 
 CREDENTIAL_FIELDS = frozenset(
     {"api_key", "credentials", "aws_access_key", "aws_secret_key", "aws_session_token"}
@@ -73,6 +80,7 @@ class ModelConfigurationSpec(CatalogSchema):
     llm_fallback: FallbackPolicy[ServiceSelection] | None = None
     stt: ServiceSelection | None = None
     tts: ServiceSelection | None = None
+    tts_fallback: TTSFallbackPolicy[ServiceSelection] | None = None
     realtime: ServiceSelection | None = None
     embeddings: ServiceSelection | None = None
 
@@ -83,6 +91,16 @@ class ModelConfigurationSpec(CatalogSchema):
             raise ValueError(f"{self.mode} requires {', '.join(required)}")
         return self
 
+    @model_serializer(mode="wrap")
+    def omit_null_tts_fallback(self, handler):
+        # Dograh 1.51 rejects a ``tts_fallback`` key (extra="forbid"). A named
+        # configuration without a voice fallback therefore never stores or
+        # returns the key, so rolling back to that release can still read it.
+        data = handler(self)
+        if data.get("tts_fallback") is None:
+            data.pop("tts_fallback", None)
+        return data
+
 
 class ModelConfigurationOverride(CatalogSchema):
     model_configuration_uuid: UUID | None = None
@@ -91,6 +109,7 @@ class ModelConfigurationOverride(CatalogSchema):
     llm_fallback: FallbackPolicy[ServiceSelection] | None = None
     stt: ServiceOverride | None = None
     tts: ServiceOverride | None = None
+    tts_fallback: TTSFallbackPolicy[ServiceSelection] | None = None
     realtime: ServiceOverride | None = None
     embeddings: ServiceOverride | None = None
 
@@ -108,11 +127,14 @@ class PreCallModelOverride(CatalogSchema):
     Only the services an agent visit owns. The call pipeline is already built
     by the time the hook answers, so the mode, recognition, the realtime
     service, embeddings and whole named configurations are not patchable here.
+    ``tts_fallback`` follows the same replace, inherit, and disable rules as
+    ``llm_fallback``.
     """
 
     llm: ServiceOverride | None = None
     llm_fallback: FallbackPolicy[ServiceSelection] | None = None
     tts: ServiceOverride | None = None
+    tts_fallback: TTSFallbackPolicy[ServiceSelection] | None = None
 
     @model_validator(mode="after")
     def reject_nulls(self):

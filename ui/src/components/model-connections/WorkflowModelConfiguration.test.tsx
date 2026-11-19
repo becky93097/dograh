@@ -96,6 +96,26 @@ describe("workflow model configuration", () => {
         expect(screen.getByRole("status").textContent).toContain("Custom settings for this agent.");
     });
 
+    it("saves custom settings without a voice fallback key, which a build without the feature rejects", async () => {
+        const { onSave, saveAt } = renderCard();
+        fireEvent.mouseDown(tab("Custom"));
+        fireEvent.change(llmModel(), { target: { value: "model-z" } });
+        await waitFor(() => expect(onSave).toHaveBeenCalledOnce(), { timeout: 2000 });
+        expect(saveAt(0)[0].model_configuration_override).not.toHaveProperty("tts_fallback");
+    });
+
+    it("does not show or save the organization default's voice fallback in custom settings", async () => {
+        const policy = { version: 1 as const, rules: [{ condition: { type: "error" as const }, target: { provider_connection_uuid: "connection", settings: { voice: "Bob" } } }] };
+        const withPolicy = [{ ...configurations[0], configuration: { ...spec("model-a", "Alice"), tts_fallback: policy } }, configurations[1]];
+        vi.mocked(useModelConnections).mockReturnValue({ catalog, connections, configurations: withPolicy, defaultUuid: "Sales", loading: false, error: null, reload: vi.fn(), addConnection: vi.fn() });
+        const { onSave, saveAt } = renderCard();
+        fireEvent.mouseDown(tab("Custom"));
+        fireEvent.change(llmModel(), { target: { value: "model-z" } });
+        await waitFor(() => expect(onSave).toHaveBeenCalledOnce(), { timeout: 2000 });
+        expect(saveAt(0)[0].model_configuration_override).toEqual(customFromScratch);
+        expect(saveAt(0)[0].model_configuration_override).not.toHaveProperty("tts_fallback");
+    });
+
     it("discards an unsaved custom draft without touching the agent", () => {
         const { onSave } = renderCard();
         fireEvent.mouseDown(tab("Custom"));

@@ -384,4 +384,7 @@ class AgentRuntime:
         fallback_metrics = getattr(self.llm, "fallback_metrics", None)
         if isinstance(fallback_metrics, dict):
             description["llm_fallback_metrics"] = fallback_metrics
+        tts_fallback_metrics = getattr(self.tts, "fallback_metrics", None)
+        if isinstance(tts_fallback_metrics, dict):
+            description["tts_fallback_metrics"] = tts_fallback_metrics
         return description

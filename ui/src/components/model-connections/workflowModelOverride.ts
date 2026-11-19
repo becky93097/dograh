@@ -14,7 +14,7 @@ import { ROLES } from "./types";
  */
 export type ModelPatch = Omit<ModelConfigurationOverride, "model_configuration_uuid">;
 
-const PATCH_KEYS = ["mode", "llm", "llm_fallback", "stt", "tts", "realtime", "embeddings"] as const;
+const PATCH_KEYS = ["mode", "llm", "llm_fallback", "tts_fallback", "stt", "tts", "realtime", "embeddings"] as const;
 
 export function splitOverride(override: ModelConfigurationOverride | null | undefined): { uuid: string | null; patch: ModelPatch } {
     const source = (override ?? {}) as Record<string, unknown>;
@@ -66,8 +66,9 @@ export function activeRoles(mode: ConfigurationSpec["mode"]): ServiceRole[] {
  * patch settings apply on top. Only embeddings may be removed (null).
  *
  * A patch that sets the mode describes a configuration rather than a tweak:
- * services the mode does not use are dropped, and a service it names with an
- * account starts from clean settings instead of the base's.
+ * services the mode does not use are dropped, a service it names with an
+ * account starts from clean settings instead of the base's, and the base's
+ * voice fallback is not inherited (the LLM fallback still is).
  */
 export function applyModelPatch(base: ConfigurationSpec, patch: ModelPatch, connections: ProviderConnection[]): ConfigurationSpec {
     const result = clone(base) as unknown as EditableSpec;
@@ -79,6 +80,8 @@ export function applyModelPatch(base: ConfigurationSpec, patch: ModelPatch, conn
         for (const role of ROLES) if (!active.includes(role)) delete result[role];
     }
     if (patch.llm_fallback !== undefined) result.llm_fallback = (patch.llm_fallback ?? null) as ConfigurationSpec["llm_fallback"];
+    if (patch.tts_fallback !== undefined) result.tts_fallback = (patch.tts_fallback ?? null) as ConfigurationSpec["tts_fallback"];
+    else if (describesConfiguration) delete result.tts_fallback;
     for (const role of ROLES) {
         const selection = patch[role];
         if (selection === undefined) continue;
@@ -105,6 +108,7 @@ export function specFromPatch(patch: ModelPatch): ConfigurationSpec {
     for (const role of activeRoles(mode)) if (role !== "llm" && role !== "embeddings") spec[role] = selection(role);
     // An empty policy only disables inherited fallbacks; it is not a policy to show.
     if (patch.llm_fallback?.rules?.length) spec.llm_fallback = patch.llm_fallback as ConfigurationSpec["llm_fallback"];
+    if (patch.tts_fallback?.rules?.length) spec.tts_fallback = patch.tts_fallback as ConfigurationSpec["tts_fallback"];
     return spec as unknown as ConfigurationSpec;
 }
 
@@ -124,6 +128,11 @@ export function isComplete(spec: ConfigurationSpec): boolean {
  * explicit empty fallback policy stops the organization default's fallbacks
  * from being inherited (they could target the account chosen as primary, or
  * be rejected in Dograh mode).
+ *
+ * `tts_fallback` is only sent when the spec sets rules for a voice: a Dograh
+ * build without the feature rejects the unknown key, and with it the whole
+ * workflow. The server does not inherit a voice fallback into an override that
+ * sets the mode, so leaving the key out is enough to have none.
  */
 export function customOverride(spec: ConfigurationSpec): ModelConfigurationOverride {
     const override: Record<string, unknown> = { mode: spec.mode };
@@ -133,6 +142,7 @@ export function customOverride(spec: ConfigurationSpec): ModelConfigurationOverr
         if (selection) override[role] = { provider_connection_uuid: selection.provider_connection_uuid, settings: { ...selection.settings } };
     }
     override.llm_fallback = spec.llm_fallback?.rules.length ? spec.llm_fallback : { rules: [] };
+    if (spec.tts_fallback?.rules.length && activeRoles(spec.mode).includes("tts")) override.tts_fallback = spec.tts_fallback;
     return override as ModelConfigurationOverride;
 }
 
