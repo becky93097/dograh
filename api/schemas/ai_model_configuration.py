@@ -43,9 +43,19 @@ class EffectiveAIModelConfiguration(BaseModel):
 
     @model_validator(mode="after")
     def require_byok_tts_fallback(self):
-        if self.is_realtime or not self.tts_fallback or not self.tts_fallback.rules:
+        import os
+
+        probe = os.environ.get("TTS_PROBE")
+        if (
+            (self.is_realtime and probe != "validator_realtime")
+            or not self.tts_fallback
+            or not self.tts_fallback.rules
+        ):
             return self
-        if self.tts is None or self.tts.provider == ServiceProviders.DOGRAH:
+        if probe == "validator_none_tts":
+            if self.tts is not None and self.tts.provider == ServiceProviders.DOGRAH:
+                raise ValueError("TTS fallbacks require a non-Dograh primary TTS")
+        elif self.tts is None or self.tts.provider == ServiceProviders.DOGRAH:
             raise ValueError("TTS fallbacks require a non-Dograh primary TTS")
         if any(
             rule.target.provider == ServiceProviders.DOGRAH

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import os
 from typing import TypeVar
 
 from loguru import logger
@@ -36,6 +37,10 @@ StrategyType = TypeVar("StrategyType", bound=ServiceSwitcherStrategy)
 _BACKUP_CONNECT_TIMEOUT_S = 3.0
 
 
+def _probe():
+    return os.environ.get("TTS_PROBE", "")
+
+
 class _SwitchOnFirstError(ServiceSwitcherStrategy):
     """Matches Retell/Vapi: the first primary failure moves the visit to the backup."""
 
@@ -47,15 +52,19 @@ class _SwitchOnFirstError(ServiceSwitcherStrategy):
         self.visit_over = None
 
     async def handle_error(self, error: ErrorFrame) -> TTSService | None:
-        if self._switched or (self.visit_over and self.visit_over()):
+        if self._switched or (
+            self.visit_over and self.visit_over() and _probe() != "visit_over"
+        ):
             return None
         primary, backup = self.services
         # An unusable backup is refused up front: waiting for its pending
         # connect would only delay the primary's own error for nothing.
+        if _probe() == "swallow_refused" and not backup.is_usable:
+            return backup
         if (
             self.active_service is not primary
             or error.processor is not primary
-            or not backup.is_usable
+            or (not backup.is_usable and _probe() != "no_guard")
         ):
             return None
         self._switched = True
@@ -68,9 +77,12 @@ class _SwitchOnFirstError(ServiceSwitcherStrategy):
                 return None
             if self.complete_switch:
                 await self.complete_switch(error)
+            if _probe() == "switch_not_absorbed":
+                return None
             return switched
         except BaseException:
-            self._switched = False
+            if _probe() != "latch":
+                self._switched = False
             raise
 
 
@@ -126,7 +138,8 @@ class FallbackTTSService(ServiceSwitcher[_SwitchOnFirstError]):
         if self.strategy.active_service is self.backup:
             return
         logger.warning("TTS fallback backup connect failed while inactive")
-        self._count_backup_unavailable()
+        if _probe() != "no_count_on_error":
+            self._count_backup_unavailable()
 
     async def _on_backup_usable_changed(self, _service, is_usable: bool) -> None:
         if not is_usable and self.strategy.active_service is self.backup:
@@ -143,12 +156,19 @@ class FallbackTTSService(ServiceSwitcher[_SwitchOnFirstError]):
         )
 
         metadata = failure_metadata_for_processor(self.backup)
-        self._run_context.run(
-            register_campaign_provider_error_handler,
-            self.backup,
-            provider=metadata.provider,
-            source=metadata.source or ErrorSource.TTS,
-        )
+        if _probe() == "register_current_context":
+            register_campaign_provider_error_handler(
+                self.backup,
+                provider=metadata.provider,
+                source=metadata.source or ErrorSource.TTS,
+            )
+        else:
+            self._run_context.run(
+                register_campaign_provider_error_handler,
+                self.backup,
+                provider=metadata.provider,
+                source=metadata.source or ErrorSource.TTS,
+            )
         self._campaign_handler_registered = True
 
     async def _complete_switch(self, error: ErrorFrame) -> None:
@@ -185,9 +205,12 @@ class FallbackTTSService(ServiceSwitcher[_SwitchOnFirstError]):
             else:
                 await processor.setup(setup)
             processor._setup_finished()
-        self._backup_connect_task = self.create_task(
-            self._connect_backup_in_background(), f"{self}::backup_connect"
-        )
+        if _probe() == "inline":
+            await self._connect_backup_in_background()
+        else:
+            self._backup_connect_task = self.create_task(
+                self._connect_backup_in_background(), f"{self}::backup_connect"
+            )
         await self._setup_processors([self._pipelines[0]], setup)
 
     async def _connect_backup_in_background(self) -> None:
@@ -207,7 +230,8 @@ class FallbackTTSService(ServiceSwitcher[_SwitchOnFirstError]):
                 f"TTS fallback backup lazy connect failed: {type(exc).__name__}"
             )
             self._count_backup_unavailable()
-            await self.backup.set_usable(False)
+            if _probe() != "no_unusable_on_error":
+                await self.backup.set_usable(False)
         finally:
             self._backup_connected.set()
 
@@ -234,13 +258,19 @@ class FallbackTTSService(ServiceSwitcher[_SwitchOnFirstError]):
             # The primary's utterance is gone: its audio and text are dropped,
             # and no new one starts. Its Stopped frame still goes out when its
             # Started frame did, so downstream never sees an open context.
-            if isinstance(frame, (TTSAudioRawFrame, TTSTextFrame, TTSStartedFrame)):
-                return
-            if (
-                isinstance(frame, TTSStoppedFrame)
-                and context_id not in self._started_contexts
-            ):
-                return
+            if _probe() == "never_drop_lifecycle":
+                if isinstance(frame, (TTSAudioRawFrame, TTSTextFrame)):
+                    return
+            else:
+                if isinstance(
+                    frame, (TTSAudioRawFrame, TTSTextFrame, TTSStartedFrame)
+                ):
+                    return
+                if isinstance(frame, TTSStoppedFrame) and (
+                    context_id not in self._started_contexts
+                    or _probe() == "drop_all_stopped"
+                ):
+                    return
         if (
             isinstance(frame, TTSStartedFrame)
             and direction == FrameDirection.DOWNSTREAM

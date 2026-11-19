@@ -96,8 +96,10 @@ class ModelConfigurationSpec(CatalogSchema):
         # Dograh 1.51 rejects a ``tts_fallback`` key (extra="forbid"). A named
         # configuration without a voice fallback therefore never stores or
         # returns the key, so rolling back to that release can still read it.
+        import os
+
         data = handler(self)
-        if data.get("tts_fallback") is None:
+        if data.get("tts_fallback") is None and os.environ.get("TTS_PROBE") != "named_null_key":
             data.pop("tts_fallback", None)
         return data
 

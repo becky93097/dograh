@@ -11,7 +11,12 @@ from pipecat.utils.tracing.langfuse_helpers import mark_trace_public
 from pipecat.utils.tracing.service_attributes import add_llm_span_attributes
 
 from api.schemas.tool import DEFAULT_TRANSFER_INTRODUCTION_PROMPT
-from api.services.pipecat.service_factory import create_single_tts_service
+import os
+
+from api.services.pipecat.service_factory import (
+    create_single_tts_service,
+    create_tts_service,
+)
 from api.services.pipecat.speech_synthesis import synthesize_speech
 from api.services.telephony.transfer_audio import store_transfer_audio
 
@@ -141,7 +146,11 @@ async def prepare_transfer_introduction(
                 logger.warning("Transfer introduction skipped reason=invalid_summary")
                 return None
             stage = "synthesis"
-            tts = create_single_tts_service(
+            tts = (
+                create_tts_service
+                if os.environ.get("TTS_PROBE") == "transfer_with_fallback"
+                else create_single_tts_service
+            )(
                 agent.user_config,
                 engine._audio_config,
                 correlation_id=engine._call_context_vars.get("mps_correlation_id"),

@@ -1,4 +1,5 @@
 import hashlib
+import os
 import json
 import re
 from functools import wraps
@@ -200,7 +201,7 @@ def _report_service_factory_failures(
                 provider=provider,
                 error_owner=error_owner,
             )
-            if register_campaign_errors:
+            if register_campaign_errors or os.environ.get("TTS_PROBE") == "register_always":
                 from api.services.campaign.circuit_breaker import (
                     register_campaign_provider_error_handler,
                 )

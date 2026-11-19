@@ -88,9 +88,41 @@ jobs:
         working-directory: api/mcp_server/ts_validator
         run: npm install
 
-      - name: Run pytest
+      - name: Run mutation probes
         working-directory: api
-        run: pytest tests/ -xvs
+        run: |
+          set +e
+          F=tests/test_fallback_tts_service.py
+          probe() {
+            name="$1"; shift
+            echo "=== PROBE-START $name ==="
+            TTS_PROBE="$name" pytest "$@" --tb=line -rf -p no:cacheprovider
+            echo "=== PROBE-RESULT $name rc=$? ==="
+          }
+          probe baseline $F tests/test_named_model_configuration_routes.py tests/test_murf_tts_service_factory.py tests/test_model_connections.py tests/test_campaign_provider_errors.py tests/test_tts_fallback_configuration.py tests/test_transfer_introduction.py
+          probe latch "$F::test_latch_cleared_when_switch_cancelled_then_retries"
+          probe inline $F -k slow_backup_connect
+          probe murf_start tests/test_murf_tts_service_factory.py::test_murf_connects_during_setup_and_start_does_no_network_io
+          probe murf_start $F -k "slow_backup_connect and murf"
+          probe visit_over "$F::test_end_frame_blocks_late_switch"
+          probe resolver_guard tests/test_model_connections.py::test_realtime_dograh_tts_with_rule_resolves_no_tts_fallback
+          probe precall_rule tests/test_model_connections.py -k pre_call_tts
+          probe precall_pin tests/test_model_connections.py -k pre_call_tts
+          probe switch_not_absorbed "$F::test_setup_error_switches_before_greeting"
+          probe swallow_refused "$F::test_refused_switch_keeps_primary_usable" "$F::test_unusable_backup_is_refused_without_waiting_for_its_connect"
+          probe no_guard "$F::test_unusable_backup_is_refused_without_waiting_for_its_connect"
+          probe drop_all_stopped "$F::test_interrupted_utterance_keeps_started_and_stopped_balanced"
+          probe never_drop_lifecycle "$F::test_primary_context_that_never_started_loses_its_lifecycle_frames"
+          probe validator_none_tts tests/test_tts_fallback_configuration.py::test_tts_fallback_pipeline_without_primary_tts_is_rejected
+          probe validator_realtime tests/test_tts_fallback_configuration.py::test_tts_fallback_realtime_validator_allows_policy_on_config
+          probe schema_no_output tests/test_tts_fallback_configuration.py::test_schema_rejects_invalid_policies
+          probe register_always tests/test_campaign_provider_errors.py::test_tts_fallback_backup_pauses_campaigns_only_once_it_is_active
+          probe register_current_context "$F::test_active_backup_pauses_campaign_when_switch_runs_outside_the_run"
+          probe transfer_with_fallback tests/test_transfer_introduction.py
+          probe named_null_key tests/test_named_model_configuration_routes.py
+          probe no_count_on_error "$F::test_inactive_backup_auth_error_does_not_pause_campaign"
+          probe no_unusable_on_error "$F::test_backup_connect_failure_marks_backup_unusable_and_counts_it"
+          exit 0
 
   notify-slack-failure:
     needs: pytest

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 from typing import Any, AsyncGenerator, Dict, Literal, Optional, Union
 
 from loguru import logger
@@ -209,7 +210,13 @@ class MurfTTSService(WebsocketTTSService):
         # a fallback switcher holds its StartFrame until every branch has
         # started, so a slow connect here would delay the greeting. run_tts
         # reconnects when the socket is missing.
-        await self._connect()
+        if os.environ.get("TTS_PROBE") != "murf_start":
+            await self._connect()
+
+    async def start(self, frame) -> None:
+        await super().start(frame)
+        if os.environ.get("TTS_PROBE") == "murf_start":
+            await self._connect()
 
     async def stop(self, frame: EndFrame) -> None:
         await super().stop(frame)

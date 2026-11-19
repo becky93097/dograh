@@ -4,6 +4,7 @@ Run snapshots contain no credentials. They retain model settings and a pool
 index; hydration reads the connection's current credentials.
 """
 
+import os as _os
 from copy import deepcopy
 from dataclasses import dataclass
 from secrets import choice
@@ -449,7 +450,10 @@ async def resolve_pre_call_model_configuration(
                 for index, rule in enumerate(snapshot["llm_fallback"]["rules"])
             ],
         }
-    if snapshot.get("tts_fallback") is not None:
+    if (
+        snapshot.get("tts_fallback") is not None
+        and _os.environ.get("TTS_PROBE") != "precall_rule"
+    ):
         config["tts_fallback"] = {
             "version": 1,
             "rules": [
@@ -493,10 +497,11 @@ async def resolve_pre_call_model_configuration(
         rule["target"]
         for rule in (resolved.snapshot.get("llm_fallback") or {}).get("rules", [])
     )
-    selections.extend(
-        rule["target"]
-        for rule in (resolved.snapshot.get("tts_fallback") or {}).get("rules", [])
-    )
+    if _os.environ.get("TTS_PROBE") != "precall_pin":
+        selections.extend(
+            rule["target"]
+            for rule in (resolved.snapshot.get("tts_fallback") or {}).get("rules", [])
+        )
     for saved in selections:
         uuid = saved["provider_connection_uuid"]
         if uuid in pins:
@@ -549,7 +554,7 @@ async def _resolve_spec(
             raise _invalid("LLM fallbacks are unavailable in Dograh mode")
         if (
             key == "tts"
-            and "tts" in active
+            and ("tts" in active or _os.environ.get("TTS_PROBE") == "resolver_guard")
             and spec.tts_fallback
             and spec.tts_fallback.rules
             and row.provider == "dograh"

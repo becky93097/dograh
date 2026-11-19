@@ -842,7 +842,10 @@ async def test_fallback_settings_cannot_inject_credentials_connections_or_recurs
     assert "injected" not in exc.value.detail
 
 
-async def _tts_fallback_resolution(catalog):
+async def _tts_fallback_resolution(catalog, monkeypatch):
+    # Pin the last key of each pool, so a pre-call patch that re-drew the index
+    # (a single-key pool always yields 0) could not match it by chance.
+    monkeypatch.setattr(service, "choice", lambda options: list(options)[-1])
     primary = connection("openai", keys=["primary-a", "primary-b"])
     backup = connection("openai", keys=["backup-a", "backup-b"])
     config = {
@@ -856,14 +859,19 @@ async def _tts_fallback_resolution(catalog):
     catalog(backup)
     resolved = await service.resolve_model_configuration(1)
     pinned = resolved.snapshot["tts_fallback"]["rules"][0]["target"]["api_key_index"]
+    assert pinned == 1
     backup_key = backup.credentials["api_key"][pinned]
     assert resolved.effective.tts_fallback.rules[0].target.api_key == backup_key
     return backup, resolved, pinned, backup_key
 
 
 @pytest.mark.asyncio
-async def test_pre_call_tts_override_keeps_the_inherited_voice_fallback(catalog):
-    _, resolved, pinned, backup_key = await _tts_fallback_resolution(catalog)
+async def test_pre_call_tts_override_keeps_the_inherited_voice_fallback(
+    catalog, monkeypatch
+):
+    _, resolved, pinned, backup_key = await _tts_fallback_resolution(
+        catalog, monkeypatch
+    )
     patched = await service.resolve_pre_call_model_configuration(
         1,
         resolved.snapshot,
@@ -879,8 +887,12 @@ async def test_pre_call_tts_override_keeps_the_inherited_voice_fallback(catalog)
 
 
 @pytest.mark.asyncio
-async def test_pre_call_tts_fallback_override_replaces_and_disables(catalog):
-    backup, resolved, pinned, backup_key = await _tts_fallback_resolution(catalog)
+async def test_pre_call_tts_fallback_override_replaces_and_disables(
+    catalog, monkeypatch
+):
+    backup, resolved, pinned, backup_key = await _tts_fallback_resolution(
+        catalog, monkeypatch
+    )
     replaced = await service.resolve_pre_call_model_configuration(
         1,
         resolved.snapshot,

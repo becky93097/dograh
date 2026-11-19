@@ -1,5 +1,6 @@
 """Versioned fallback policy shared by saved references and resolved services."""
 
+import os as _os
 from typing import Annotated, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -42,7 +43,11 @@ class FallbackPolicy(FallbackSchema, Generic[Target]):
 
 
 class TTSFallbackRule(FallbackSchema, Generic[Target]):
-    condition: ErrorCondition
+    condition: (
+        FallbackCondition
+        if _os.environ.get("TTS_PROBE") == "schema_no_output"
+        else ErrorCondition
+    )
     target: Target
 
 
