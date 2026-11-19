@@ -1,0 +1,42 @@
+---
+title: Voice (TTS) fallback
+description: Optional backup voice when the primary TTS fails during a call.
+---
+
+## Overview
+
+`tts_fallback` mirrors `llm_fallback`: one rule with the `error` condition selects a backup voice. On the **first** primary TTS error, the agent switches to that voice for the rest of the visit. The switch does not replay text the primary failed to speak (v1).
+
+The policy is **off** when omitted or when `rules` is empty. It is ignored in **realtime** mode. A **Dograh-managed** primary TTS or target is rejected (the request fails with a 422), because Dograh manages its own fallbacks.
+
+## JSON shape
+
+```json
+{
+  "tts_fallback": {
+    "version": 1,
+    "rules": [
+      {
+        "condition": { "type": "error" },
+        "target": {
+          "provider_connection_uuid": "<uuid>",
+          "settings": { "model": "...", "voice": "..." }
+        }
+      }
+    ]
+  }
+}
+```
+
+Set it on named model configurations, workflow or API-trigger overrides, and pre-call overrides (alongside `llm`, `llm_fallback`, and `tts`). Resolved runs store the policy without credentials in the workflow snapshot, the same way as LLM fallbacks.
+
+## Behaviour
+
+- The backup must be a different connection or voice than the primary TTS.
+- Dograh cannot be the primary or the target: such a configuration is rejected rather than ignored.
+- A named model configuration without a voice fallback never stores or returns the `tts_fallback` key.
+- An empty `rules` array disables an inherited policy. An override that sets `mode` describes a whole configuration and does not inherit one: it has no voice fallback unless it sets its own, so leave the key out to have none.
+- Call metrics record `tts_fallback_metrics`: `switched` increments on each visit that successfully moved to the backup; `backup_unavailable` increments at most once per visit, when the inactive backup reports any error before it is used or its background connect raises. The count alone does not retire the backup: it stops being used only after a permanent error (authentication, authorization or an invalid request) or a connect that raises, and a later primary error then does not switch. After a transient error such as a 5xx the backup stays usable, and a later primary error still switches to it. A connect that only times out (3 seconds) is not counted: the backup stays eligible and reconnects when it first has to speak.
+- The trigger is the **first** primary error, matching Retell and Vapi. A transient error the primary would have recovered from also switches the voice for the rest of the visit (v1 risk).
+
+Configure through the API today; the Models UI editor ships in a follow-up change.

@@ -3186,6 +3186,7 @@ export type ModelConfigurationOverride = {
     llm_fallback?: FallbackPolicyServiceSelection | null;
     stt?: ServiceOverride | null;
     tts?: ServiceOverride | null;
+    tts_fallback?: TtsFallbackPolicyServiceSelection | null;
     realtime?: ServiceOverride | null;
     embeddings?: ServiceOverride | null;
 };
@@ -3224,6 +3225,7 @@ export type ModelConfigurationSpec = {
     llm_fallback?: FallbackPolicyServiceSelection | null;
     stt?: ServiceSelection | null;
     tts?: ServiceSelection | null;
+    tts_fallback?: TtsFallbackPolicyServiceSelection | null;
     realtime?: ServiceSelection | null;
     embeddings?: ServiceSelection | null;
 };
@@ -5214,6 +5216,28 @@ export type TtsCacheList = {
      * Total
      */
     total: number;
+};
+
+/**
+ * TTSFallbackPolicy[ServiceSelection]
+ */
+export type TtsFallbackPolicyServiceSelection = {
+    /**
+     * Version
+     */
+    version?: 1;
+    /**
+     * Rules
+     */
+    rules?: Array<TtsFallbackRuleServiceSelection>;
+};
+
+/**
+ * TTSFallbackRule[ServiceSelection]
+ */
+export type TtsFallbackRuleServiceSelection = {
+    condition: ErrorCondition;
+    target: ServiceSelection;
 };
 
 /**

@@ -51,6 +51,7 @@
             "group": "Configurations",
             "pages": [
               "configurations/inference-providers",
+              "configurations/tts-fallback",
               "configurations/llm",
               "configurations/voice",
               "configurations/transcriber",

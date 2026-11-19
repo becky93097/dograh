@@ -3,7 +3,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from pipecat.frames.frames import TTSStoppedFrame
+from pipecat.clocks.system_clock import SystemClock
+from pipecat.frames.frames import StartFrame, TTSStoppedFrame
+from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.utils.asyncio.task_manager import TaskManager
 from websockets.protocol import State
 
 from api.services.configuration.check_validity import UserConfigurationValidator
@@ -244,3 +247,25 @@ async def test_murf_connect_keeps_running_receiver():
         running.cancel()
         with pytest.raises(asyncio.CancelledError):
             await running
+
+
+@pytest.mark.asyncio
+async def test_murf_connects_during_setup_and_start_does_no_network_io():
+    """A fallback switcher holds its StartFrame until every branch has started,
+    so a backup that connects in start() would delay the whole call."""
+    service = MurfTTSService(api_key="test-key")
+    connect_websocket = AsyncMock()
+    service._connect_websocket = connect_websocket
+    processor_setup = FrameProcessorSetup(
+        clock=SystemClock(),
+        task_manager=TaskManager(),
+        pipeline_worker=SimpleNamespace(app_resources={}, worker_runner=None),
+    )
+
+    await service.setup(processor_setup)
+    connect_websocket.assert_awaited_once()
+    assert service._murf_settings["sample_rate"] == service.sample_rate
+
+    await service.start(StartFrame())
+    connect_websocket.assert_awaited_once()
+    await service.cleanup()

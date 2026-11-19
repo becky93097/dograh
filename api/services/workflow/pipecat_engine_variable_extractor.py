@@ -28,6 +28,7 @@ ENGINE_OWNED_CONTEXT_KEYS = frozenset(
         "answer_supervisor",
         "tool_results",
         "llm_fallback_metrics",
+        "tts_fallback_metrics",
         "sip_call_id",
         "extracted_variables",
         "nodes_visited",

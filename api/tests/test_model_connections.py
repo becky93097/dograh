@@ -700,6 +700,13 @@ def fallback_rule(row, condition=None, **settings):
     }
 
 
+def tts_fallback_rule(row, **settings):
+    return {
+        "condition": {"type": "error"},
+        "target": selection(row, **settings),
+    }
+
+
 @pytest.mark.asyncio
 async def test_dograh_rejects_fallback_rules_but_allows_disabling_them(catalog):
     primary = connection()
@@ -816,6 +823,56 @@ async def test_fallback_policies_inherit_replace_and_disable_atomically(catalog)
 
 
 @pytest.mark.asyncio
+async def test_mode_setting_override_starts_without_the_inherited_voice_fallback(
+    catalog,
+):
+    """An override that sets the mode describes a whole configuration: it does
+    not pick up the base's voice fallback, so a Dograh voice resolves with the
+    key left out, today and after a policy is later added to the base."""
+    primary = connection("openai")
+    backup = connection("openai")
+    dograh = connection()
+    catalog(backup)
+    catalog(dograh)
+    config = {
+        **pipeline(primary),
+        "tts_fallback": {"version": 1, "rules": [tts_fallback_rule(backup)]},
+    }
+    catalog(primary, default=True, configuration=config)
+
+    inherited = await service.resolve_model_configuration(
+        1, workflow_override={"tts": {"settings": {"voice": "v2"}}}
+    )
+    assert len(inherited.effective.tts_fallback.rules) == 1
+    with pytest.raises(HTTPException, match="TTS fallbacks are unavailable"):
+        await service.resolve_model_configuration(
+            1, workflow_override={"tts": selection(dograh)}
+        )
+
+    custom = {
+        "mode": "pipeline",
+        **{role: selection(dograh) for role in ("llm", "stt", "tts")},
+    }
+    resolved = await service.resolve_model_configuration(1, workflow_override=custom)
+    assert resolved.effective.tts.provider == "dograh"
+    assert resolved.effective.tts_fallback is None
+    assert resolved.snapshot["tts_fallback"] is None
+
+    own = {
+        **custom,
+        **{role: selection(primary) for role in ("llm", "stt", "tts")},
+        "tts_fallback": {"rules": [tts_fallback_rule(backup, voice="own")]},
+    }
+    resolved = await service.resolve_model_configuration(1, workflow_override=own)
+    assert resolved.effective.tts_fallback.rules[0].target.voice == "own"
+
+    disabled = await service.resolve_model_configuration(
+        1, workflow_override={**custom, "tts_fallback": {"rules": []}}
+    )
+    assert disabled.effective.tts_fallback.rules == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "settings",
     [{"api_key": "injected"}, {"location": "global"}, {"fallback_model": "nested"}],
@@ -833,6 +890,176 @@ async def test_fallback_settings_cannot_inject_credentials_connections_or_recurs
         await service.resolve_model_configuration(1)
     assert exc.value.status_code == 422
     assert "injected" not in exc.value.detail
+
+
+async def _tts_fallback_resolution(catalog, monkeypatch):
+    # The first resolution draws the last key of each pool and every later draw
+    # the first, so a pre-call patch that re-drew the backup's key (or re-read
+    # the pool from the catalog) would land on index 0, not on the pinned 1.
+    first_resolution = True
+
+    def draw(options):
+        keys = list(options)
+        return keys[-1] if first_resolution else keys[0]
+
+    monkeypatch.setattr(service, "choice", draw)
+    primary = connection("openai", keys=["primary-a", "primary-b"])
+    backup = connection("openai", keys=["backup-a", "backup-b"])
+    config = {
+        **pipeline(primary),
+        "tts_fallback": {
+            "version": 1,
+            "rules": [tts_fallback_rule(backup, model="backup-v1", voice="v1")],
+        },
+    }
+    catalog(primary, default=True, configuration=config)
+    catalog(backup)
+    resolved = await service.resolve_model_configuration(1)
+    first_resolution = False
+    pinned = resolved.snapshot["tts_fallback"]["rules"][0]["target"]["api_key_index"]
+    assert pinned == 1
+    backup_key = backup.credentials["api_key"][pinned]
+    assert resolved.effective.tts_fallback.rules[0].target.api_key == backup_key
+    return backup, resolved, pinned, backup_key
+
+
+@pytest.mark.asyncio
+async def test_pre_call_tts_override_keeps_the_inherited_voice_fallback(
+    catalog, monkeypatch
+):
+    _, resolved, pinned, backup_key = await _tts_fallback_resolution(
+        catalog, monkeypatch
+    )
+    patched = await service.resolve_pre_call_model_configuration(
+        1,
+        resolved.snapshot,
+        resolved.effective,
+        PreCallModelOverride(tts={"settings": {"voice": "v9"}}),
+    )
+    assert patched.effective.tts.voice == "v9"
+    rule = patched.effective.tts_fallback.rules[0]
+    assert (rule.target.model, rule.target.voice) == ("backup-v1", "v1")
+    assert rule.target.api_key == backup_key
+    patched_target = patched.snapshot["tts_fallback"]["rules"][0]["target"]
+    assert patched_target["api_key_index"] == pinned
+
+
+@pytest.mark.asyncio
+async def test_pre_call_tts_fallback_override_replaces_and_disables(
+    catalog, monkeypatch
+):
+    backup, resolved, pinned, backup_key = await _tts_fallback_resolution(
+        catalog, monkeypatch
+    )
+    replaced = await service.resolve_pre_call_model_configuration(
+        1,
+        resolved.snapshot,
+        resolved.effective,
+        PreCallModelOverride(
+            tts_fallback={
+                "version": 1,
+                "rules": [tts_fallback_rule(backup, model="backup-v2", voice="v2")],
+            }
+        ),
+    )
+    rule = replaced.effective.tts_fallback.rules[0]
+    assert (rule.target.model, rule.target.voice) == ("backup-v2", "v2")
+    assert rule.target.api_key == backup_key
+    replaced_target = replaced.snapshot["tts_fallback"]["rules"][0]["target"]
+    assert replaced_target["api_key_index"] == pinned
+
+    disabled = await service.resolve_pre_call_model_configuration(
+        1,
+        resolved.snapshot,
+        resolved.effective,
+        PreCallModelOverride(tts_fallback={"version": 1, "rules": []}),
+    )
+    assert disabled.effective.tts_fallback.rules == []
+    assert disabled.snapshot["tts_fallback"]["rules"] == []
+
+
+@pytest.mark.asyncio
+async def test_tts_fallback_snapshot_round_trip(catalog):
+    primary = connection("openai")
+    backup = connection("openai", keys=["backup-a", "backup-b"])
+    catalog(backup)
+    config = pipeline(primary)
+    config["tts_fallback"] = {
+        "version": 1,
+        "rules": [tts_fallback_rule(backup, model="gpt-4.1", voice="v1")],
+    }
+    catalog(primary, default=True, configuration=config)
+    resolved = await service.resolve_model_configuration(1)
+    rule = resolved.effective.tts_fallback.rules[0]
+    assert rule.target.model == "gpt-4.1"
+    snapshot = resolved.snapshot
+    target = snapshot["tts_fallback"]["rules"][0]["target"]
+    index = target["api_key_index"]
+    assert rule.target.api_key == backup.credentials["api_key"][index]
+    assert "backup-a" not in str(snapshot) and "backup-b" not in str(snapshot)
+    assert "api_key_index" not in str(service.public_snapshot(snapshot))
+    hydrated = await service.hydrate_model_configuration_snapshot(1, snapshot)
+    assert hydrated.tts_fallback.rules[0].target.model == "gpt-4.1"
+
+
+@pytest.mark.asyncio
+async def test_old_tts_fallback_snapshot_hydrates_none(catalog):
+    primary = connection("openai")
+    catalog(primary, default=True)
+    resolved = await service.resolve_model_configuration(1)
+    snapshot = resolved.snapshot
+    snapshot.pop("tts_fallback", None)
+    hydrated = await service.hydrate_model_configuration_snapshot(1, snapshot)
+    assert hydrated.tts_fallback is None
+
+
+@pytest.mark.asyncio
+async def test_realtime_dograh_tts_with_rule_resolves_no_tts_fallback(catalog):
+    dograh = connection("dograh")
+    backup = connection("openai")
+    realtime = connection("openai_realtime")
+    catalog(dograh, default=True)
+    catalog(backup)
+    catalog(realtime)
+    config = {
+        "version": 3,
+        "mode": "realtime",
+        "llm": selection(dograh),
+        "tts": selection(dograh),
+        "realtime": selection(realtime),
+        "tts_fallback": {"rules": [tts_fallback_rule(backup)]},
+    }
+    resolved = await service.resolve_inline_model_configuration(1, config)
+    assert resolved.effective.tts_fallback is None
+
+
+@pytest.mark.asyncio
+async def test_realtime_resolves_no_tts_fallback(catalog):
+    primary = connection("openai")
+    backup = connection("openai")
+    realtime = connection("openai_realtime")
+    catalog(primary)
+    catalog(backup)
+    catalog(realtime)
+    config = {
+        "version": 3,
+        "mode": "realtime",
+        "llm": selection(primary),
+        "realtime": selection(realtime),
+        "tts_fallback": {"rules": [tts_fallback_rule(backup)]},
+    }
+    resolved = await service.resolve_inline_model_configuration(1, config)
+    assert resolved.effective.tts_fallback is None
+
+
+@pytest.mark.asyncio
+async def test_tts_fallback_cannot_repeat_primary(catalog):
+    primary = connection("openai")
+    catalog(primary, default=True)
+    config = pipeline(primary)
+    config["tts_fallback"] = {"rules": [tts_fallback_rule(primary)]}
+    with pytest.raises(HTTPException, match="must differ"):
+        await service.resolve_inline_model_configuration(1, config)
 
 
 @pytest.mark.asyncio

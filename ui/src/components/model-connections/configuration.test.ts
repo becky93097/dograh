@@ -106,15 +106,25 @@ describe("model connection editor settings", () => {
 
     it("preserves fallback rules between Cascade and Realtime and clears them for Dograh", () => {
         const available = [...connections, connection("dograh", "dograh")];
-        const configured: ConfigurationSpec = { ...base, llm_fallback: { version: 1, rules: [{ condition: { type: "error" }, target: { provider_connection_uuid: "google", settings: {} } }] } };
+        const configured: ConfigurationSpec = {
+            ...base,
+            llm_fallback: { version: 1, rules: [{ condition: { type: "error" }, target: { provider_connection_uuid: "google", settings: {} } }] },
+            tts_fallback: { version: 1, rules: [{ condition: { type: "error" }, target: { provider_connection_uuid: "google", settings: {} } }] },
+        };
         const realtime = configurationForMode("realtime", configured, catalog, available);
         expect(cleanConfiguration(realtime, catalog, available).llm_fallback).toEqual(configured.llm_fallback);
+        expect(cleanConfiguration(realtime, catalog, available).tts_fallback).toEqual(configured.tts_fallback);
         const cascade = configurationForMode("cascade", realtime, catalog, available);
         expect(cleanConfiguration(cascade, catalog, available).llm_fallback).toEqual(configured.llm_fallback);
+        expect(cleanConfiguration(cascade, catalog, available).tts_fallback).toEqual(configured.tts_fallback);
         const dograh = configurationForMode("dograh", cascade, catalog, available);
         expect(dograh).not.toHaveProperty("llm_fallback");
-        expect(cleanConfiguration({ ...dograh, llm_fallback: configured.llm_fallback }, catalog, available)).not.toHaveProperty("llm_fallback");
+        expect(dograh).not.toHaveProperty("tts_fallback");
+        const cleanedDograh = cleanConfiguration({ ...dograh, llm_fallback: configured.llm_fallback, tts_fallback: configured.tts_fallback }, catalog, available);
+        expect(cleanedDograh).not.toHaveProperty("llm_fallback");
+        expect(cleanedDograh).not.toHaveProperty("tts_fallback");
         expect(configurationForMode("cascade", dograh, catalog, available).llm_fallback).toBeUndefined();
+        expect(configurationForMode("cascade", dograh, catalog, available).tts_fallback).toBeUndefined();
     });
 
     it("removes both numeric maximum declarations for custom endpoints", () => {

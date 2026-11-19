@@ -90,6 +90,44 @@ describe("custom overrides", () => {
         const withPolicy = { ...cascade, llm_fallback: { version: 1 as const, rules: [{ condition: { type: "error" as const }, target: { provider_connection_uuid: "openai-b", settings: {} } }] } };
         expect(customOverride(withPolicy).llm_fallback).toEqual(withPolicy.llm_fallback);
         expect(specFromPatch(splitOverride(customOverride(withPolicy)).patch).llm_fallback).toEqual(withPolicy.llm_fallback);
+        const withTtsPolicy = { ...cascade, tts_fallback: { version: 1 as const, rules: [{ condition: { type: "error" as const }, target: { provider_connection_uuid: "openai-b", settings: { voice: "Rachel" } } }] } };
+        expect(customOverride(withTtsPolicy).tts_fallback).toEqual(withTtsPolicy.tts_fallback);
+        expect(specFromPatch(splitOverride(customOverride(withTtsPolicy)).patch).tts_fallback).toEqual(withTtsPolicy.tts_fallback);
+        const replaced = applyModelPatch(withTtsPolicy, { tts_fallback: { rules: [] } }, connections);
+        expect(replaced.tts_fallback).toEqual({ rules: [] });
+    });
+
+    // A Dograh build without the voice fallback rejects a workflow whose override has the key, so it is sent only when it carries rules.
+    describe("tts_fallback key", () => {
+        const rules = [{ condition: { type: "error" as const }, target: { provider_connection_uuid: "openai-b", settings: { voice: "Rachel" } } }];
+        const withRules = { ...cascade, tts_fallback: { version: 1 as const, rules } };
+
+        it("is absent when the spec has no rules", () => {
+            expect(customOverride(cascade)).not.toHaveProperty("tts_fallback");
+            expect(customOverride({ ...cascade, tts_fallback: { version: 1, rules: [] } })).not.toHaveProperty("tts_fallback");
+            expect(customOverride({ ...cascade, tts_fallback: null })).not.toHaveProperty("tts_fallback");
+        });
+
+        it("carries the rules the spec sets", () => {
+            expect(customOverride(withRules).tts_fallback).toEqual(withRules.tts_fallback);
+        });
+
+        it("is never sent in realtime mode, where the voice fallback does not apply", () => {
+            const realtime: ConfigurationSpec = { ...cascade, mode: "realtime", realtime: { provider_connection_uuid: "openai-a", settings: { model: "gpt-realtime" } }, embeddings: null };
+            expect(customOverride({ ...realtime, tts_fallback: withRules.tts_fallback })).not.toHaveProperty("tts_fallback");
+        });
+    });
+
+    // The server does not inherit a voice fallback into an override that sets the mode, so the editor must not show one either.
+    it("starts a mode-setting patch without the base's voice fallback, and keeps inheriting it otherwise", () => {
+        const policy = { version: 1 as const, rules: [{ condition: { type: "error" as const }, target: { provider_connection_uuid: "openai-b", settings: { voice: "Rachel" } } }] };
+        const base = { ...cascade, tts_fallback: policy };
+        expect(applyModelPatch(base, { mode: "pipeline", llm: cascade.llm }, connections)).not.toHaveProperty("tts_fallback");
+        expect(applyModelPatch(base, { mode: "pipeline", tts_fallback: policy }, connections).tts_fallback).toEqual(policy);
+        expect(applyModelPatch(base, { tts: { settings: { voice: "Alice" } } }, connections).tts_fallback).toEqual(policy);
+        const saved = describeWorkflowModel(resolveWorkflowConfigurations({ model_configuration_override: customOverride(cascade) }), { ...context, configurations: [named("prod", "Production voice", { configuration: base })] });
+        expect(saved.kind).toBe("custom");
+        if (saved.kind === "custom") expect(saved.spec).not.toHaveProperty("tts_fallback");
     });
 
     it("knows when every service has an account", () => {

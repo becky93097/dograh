@@ -87,7 +87,7 @@ A campaign paused by the circuit breaker behaves the same as a manually paused c
 
 ### Provider errors
 
-An HTTP 401, 402, or 403 reported by a campaign call's STT, TTS, LLM, realtime, or outbound telephony provider immediately pauses that campaign. This applies independently of the failure-rate threshold and sample size, including errors handled by an LLM fallback. The campaign log records the provider, status code, and workflow run that caused the pause.
+An HTTP 401, 402, or 403 reported by a campaign call's STT, TTS, LLM, realtime, or outbound telephony provider immediately pauses that campaign. This applies independently of the failure-rate threshold and sample size, including errors that an LLM or TTS fallback recovers from: a primary voice that fails with a 401, 402, or 403 pauses the campaign even when the backup voice takes over the call. A backup voice counts only once it is the active one; its authentication error while it connects in the background does not pause the campaign. The campaign log records the provider, status code, and workflow run that caused the pause.
 
 Fix the provider issue, then resume the campaign normally. Resuming clears the pause; another 401, 402, or 403 pauses it again. Other provider errors do not trigger this immediate pause; pipeline failures still contribute to the existing failure-rate breaker.
 

@@ -20,10 +20,10 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -202,9 +202,13 @@ class MurfTTSService(WebsocketTTSService):
             logger.error(f"{self} connection verification failed: {e}")
             return False
 
-    async def start(self, frame: StartFrame) -> None:
-        await super().start(frame)
+    async def setup(self, setup: FrameProcessorSetup) -> None:
+        await super().setup(setup)
         self._murf_settings["sample_rate"] = self.sample_rate
+        # Connect while the pipeline is set up, not while it handles StartFrame:
+        # a fallback switcher holds its StartFrame until every branch has
+        # started, so a slow connect here would delay the greeting. run_tts
+        # reconnects when the socket is missing.
         await self._connect()
 
     async def stop(self, frame: EndFrame) -> None:

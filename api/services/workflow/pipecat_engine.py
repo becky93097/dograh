@@ -2488,6 +2488,26 @@ class PipecatEngine:
                 )
                 for key in ("started", "won")
             }
+        tts_fallback_metrics = [
+            visit["tts_fallback_metrics"]
+            for visit in self.agent_visits
+            if "tts_fallback_metrics" in visit
+        ]
+        previous_tts = context.get("tts_fallback_metrics")
+        if isinstance(previous_tts, dict):
+            tts_fallback_metrics.append(previous_tts)
+        if tts_fallback_metrics:
+            context["tts_fallback_metrics"] = {
+                key: sum(
+                    value
+                    for metrics in tts_fallback_metrics
+                    if isinstance(metrics, dict)
+                    and isinstance(value := metrics.get(key, 0), int)
+                    and not isinstance(value, bool)
+                    and value >= 0
+                )
+                for key in ("switched", "backup_unavailable")
+            }
         return context
 
     async def _open_mcp_sessions(self, agent: AgentRuntime | None = None) -> None:
