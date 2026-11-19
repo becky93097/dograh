@@ -105,6 +105,7 @@ export default function ModelConfigurationsManager({ docsUrl }: { docsUrl?: stri
                             const needsProviders = [
                                 ...ROLES.map(role => item.configuration[role]),
                                 ...(item.configuration.llm_fallback?.rules || []).map(rule => rule.target),
+                                ...(item.configuration.tts_fallback?.rules || []).map(rule => rule.target),
                             ].some(selection => {
                                 return selection && !activeConnections.some(connection => connection.uuid === selection.provider_connection_uuid);
                             });

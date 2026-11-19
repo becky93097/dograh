@@ -14,7 +14,7 @@ import { ROLES } from "./types";
  */
 export type ModelPatch = Omit<ModelConfigurationOverride, "model_configuration_uuid">;
 
-const PATCH_KEYS = ["mode", "llm", "llm_fallback", "stt", "tts", "realtime", "embeddings"] as const;
+const PATCH_KEYS = ["mode", "llm", "llm_fallback", "tts_fallback", "stt", "tts", "realtime", "embeddings"] as const;
 
 export function splitOverride(override: ModelConfigurationOverride | null | undefined): { uuid: string | null; patch: ModelPatch } {
     const source = (override ?? {}) as Record<string, unknown>;
@@ -79,6 +79,7 @@ export function applyModelPatch(base: ConfigurationSpec, patch: ModelPatch, conn
         for (const role of ROLES) if (!active.includes(role)) delete result[role];
     }
     if (patch.llm_fallback !== undefined) result.llm_fallback = (patch.llm_fallback ?? null) as ConfigurationSpec["llm_fallback"];
+    if (patch.tts_fallback !== undefined) result.tts_fallback = (patch.tts_fallback ?? null) as ConfigurationSpec["tts_fallback"];
     for (const role of ROLES) {
         const selection = patch[role];
         if (selection === undefined) continue;
@@ -105,6 +106,7 @@ export function specFromPatch(patch: ModelPatch): ConfigurationSpec {
     for (const role of activeRoles(mode)) if (role !== "llm" && role !== "embeddings") spec[role] = selection(role);
     // An empty policy only disables inherited fallbacks; it is not a policy to show.
     if (patch.llm_fallback?.rules?.length) spec.llm_fallback = patch.llm_fallback as ConfigurationSpec["llm_fallback"];
+    if (patch.tts_fallback?.rules?.length) spec.tts_fallback = patch.tts_fallback as ConfigurationSpec["tts_fallback"];
     return spec as unknown as ConfigurationSpec;
 }
 
@@ -133,6 +135,7 @@ export function customOverride(spec: ConfigurationSpec): ModelConfigurationOverr
         if (selection) override[role] = { provider_connection_uuid: selection.provider_connection_uuid, settings: { ...selection.settings } };
     }
     override.llm_fallback = spec.llm_fallback?.rules.length ? spec.llm_fallback : { rules: [] };
+    override.tts_fallback = spec.tts_fallback?.rules.length ? spec.tts_fallback : { rules: [] };
     return override as ModelConfigurationOverride;
 }
 

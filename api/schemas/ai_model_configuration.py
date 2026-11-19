@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, model_validator
 
-from api.schemas.llm_fallback import FallbackPolicy
+from api.schemas.llm_fallback import FallbackPolicy, TTSFallbackPolicy
 from api.services.configuration.registry import (
     EmbeddingsConfig,
     LLMConfig,
@@ -18,6 +18,7 @@ class EffectiveAIModelConfiguration(BaseModel):
     llm_fallback: FallbackPolicy[LLMConfig] | None = None
     stt: STTConfig | None = None
     tts: TTSConfig | None = None
+    tts_fallback: TTSFallbackPolicy[TTSConfig] | None = None
     embeddings: EmbeddingsConfig | None = None
     realtime: RealtimeConfig | None = None
     is_realtime: bool = False
@@ -34,6 +35,21 @@ class EffectiveAIModelConfiguration(BaseModel):
         if any(
             rule.target.provider == ServiceProviders.DOGRAH
             for rule in self.llm_fallback.rules
+        ):
+            raise ValueError(
+                "Dograh manages its own fallbacks and cannot be a fallback target"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def require_byok_tts_fallback(self):
+        if self.is_realtime or not self.tts_fallback or not self.tts_fallback.rules:
+            return self
+        if self.tts is None or self.tts.provider == ServiceProviders.DOGRAH:
+            raise ValueError("TTS fallbacks require a non-Dograh primary TTS")
+        if any(
+            rule.target.provider == ServiceProviders.DOGRAH
+            for rule in self.tts_fallback.rules
         ):
             raise ValueError(
                 "Dograh manages its own fallbacks and cannot be a fallback target"

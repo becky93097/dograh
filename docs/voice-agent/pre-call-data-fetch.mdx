@@ -120,7 +120,7 @@ Return `model_overrides` beside `initial_context`, either at the top level or in
 
 Use a voice supported by the selected TTS provider. You may return only `model_overrides` when no context enrichment is needed. If you use the `call_inbound` envelope, put both fields inside it.
 
-Fetched model settings take precedence over workflow and API-trigger settings for the services the agent owns: `llm`, `llm_fallback`, and `tts`. A service may also select a `provider_connection_uuid`, following the same-provider and different-provider rules of [API trigger overrides](/voice-agent/api-trigger#choosing-models-for-one-call), as long as it keeps the Dograh service key the call was authorized with.
+Fetched model settings take precedence over workflow and API-trigger settings for the services the agent owns: `llm`, `llm_fallback`, `tts`, and `tts_fallback`. A service may also select a `provider_connection_uuid`, following the same-provider and different-provider rules of [API trigger overrides](/voice-agent/api-trigger#choosing-models-for-one-call), as long as it keeps the Dograh service key the call was authorized with.
 
 The call is already connected when your endpoint answers, so the hook cannot change what the call pipeline was built with: it cannot select a named configuration (`model_configuration_uuid`) or change `mode`, `stt`, `realtime`, or `embeddings`. Set those on the workflow or the API trigger instead. Realtime (speech-to-speech) agents ignore `model_overrides` entirely.
 

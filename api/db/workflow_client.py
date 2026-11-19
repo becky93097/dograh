@@ -265,6 +265,10 @@ class WorkflowClient(BaseDBClient):
                 rule["target"]
                 for rule in (configuration.get("llm_fallback") or {}).get("rules", [])
             )
+            selections.extend(
+                rule["target"]
+                for rule in (configuration.get("tts_fallback") or {}).get("rules", [])
+            )
             for selection in selections:
                 if not selection or "provider_connection_uuid" not in selection:
                     continue

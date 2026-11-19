@@ -50,6 +50,7 @@ const customFromScratch = {
     tts: { provider_connection_uuid: "connection", settings: {} },
     embeddings: null,
     llm_fallback: { rules: [] },
+    tts_fallback: { rules: [] },
 };
 
 beforeEach(() => {
@@ -130,6 +131,7 @@ describe("workflow model configuration", () => {
             tts: { provider_connection_uuid: "connection", settings: { voice: "Alice" } },
             embeddings: null,
             llm_fallback: { rules: [] },
+            tts_fallback: { rules: [] },
         });
     });
 

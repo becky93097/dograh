@@ -39,3 +39,15 @@ class FallbackPolicy(FallbackSchema, Generic[Target]):
         if len(types) != len(set(types)):
             raise ValueError("Only one fallback rule per condition is supported")
         return self
+
+
+class TTSFallbackRule(FallbackSchema, Generic[Target]):
+    condition: ErrorCondition
+    target: Target
+
+
+class TTSFallbackPolicy(FallbackSchema, Generic[Target]):
+    """One backup voice used from the primary's first error to the end of the visit."""
+
+    version: Literal[1] = 1
+    rules: list[TTSFallbackRule[Target]] = Field(default_factory=list, max_length=1)

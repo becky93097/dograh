@@ -5,6 +5,8 @@ import type {
     NamedModelConfigurationResponse,
     ProviderConnectionResponse,
     ServiceSelection as ApiServiceSelection,
+    TtsFallbackPolicyServiceSelection as ApiTtsFallbackPolicy,
+    TtsFallbackRuleServiceSelection as ApiTtsFallbackRule,
 } from "@/client/types.gen";
 
 // Catalog field metadata comes from the backend provider registry. It describes
@@ -68,10 +70,14 @@ export type ServiceSelection = Required<ApiServiceSelection>;
 export type FallbackCondition = ApiFallbackRule["condition"];
 export type FallbackRule = Omit<ApiFallbackRule, "target"> & { target: ServiceSelection };
 export type FallbackPolicy = Omit<Required<ApiFallbackPolicy>, "rules"> & { rules: FallbackRule[] };
-export type ConfigurationSpec = Omit<ApiConfigurationSpec, ServiceRole | "llm_fallback"> &
+export type TtsFallbackRule = Omit<ApiTtsFallbackRule, "target"> & { target: ServiceSelection };
+export type TtsFallbackPolicy = Omit<Required<ApiTtsFallbackPolicy>, "rules"> & { rules: TtsFallbackRule[] };
+
+export type ConfigurationSpec = Omit<ApiConfigurationSpec, ServiceRole | "llm_fallback" | "tts_fallback"> &
     Required<Pick<ApiConfigurationSpec, "version" | "mode">> & {
         llm: ServiceSelection;
         llm_fallback?: FallbackPolicy | null;
+        tts_fallback?: TtsFallbackPolicy | null;
     } & Partial<Record<Exclude<ServiceRole, "llm">, ServiceSelection | null>>;
 
 

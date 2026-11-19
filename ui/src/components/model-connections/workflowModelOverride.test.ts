@@ -82,14 +82,19 @@ describe("applyModelPatch", () => {
 describe("custom overrides", () => {
     it("stores the whole spec for the active mode, disables inherited fallbacks, and reads back", () => {
         const override = customOverride(cascade);
-        expect(override).toEqual({ mode: "pipeline", llm: cascade.llm, stt: cascade.stt, tts: cascade.tts, embeddings: cascade.embeddings, llm_fallback: { rules: [] } });
+        expect(override).toEqual({ mode: "pipeline", llm: cascade.llm, stt: cascade.stt, tts: cascade.tts, embeddings: cascade.embeddings, llm_fallback: { rules: [] }, tts_fallback: { rules: [] } });
         expect(specFromPatch(splitOverride(override).patch)).toEqual(cascade);
         const realtime: ConfigurationSpec = { ...cascade, mode: "realtime", realtime: { provider_connection_uuid: "openai-a", settings: { model: "gpt-realtime" } }, embeddings: null };
-        expect(customOverride(realtime)).toEqual({ mode: "realtime", llm: cascade.llm, realtime: realtime.realtime, embeddings: null, llm_fallback: { rules: [] } });
+        expect(customOverride(realtime)).toEqual({ mode: "realtime", llm: cascade.llm, realtime: realtime.realtime, embeddings: null, llm_fallback: { rules: [] }, tts_fallback: { rules: [] } });
         expect(customOverride(realtime)).not.toHaveProperty("stt");
         const withPolicy = { ...cascade, llm_fallback: { version: 1 as const, rules: [{ condition: { type: "error" as const }, target: { provider_connection_uuid: "openai-b", settings: {} } }] } };
         expect(customOverride(withPolicy).llm_fallback).toEqual(withPolicy.llm_fallback);
         expect(specFromPatch(splitOverride(customOverride(withPolicy)).patch).llm_fallback).toEqual(withPolicy.llm_fallback);
+        const withTtsPolicy = { ...cascade, tts_fallback: { version: 1 as const, rules: [{ condition: { type: "error" as const }, target: { provider_connection_uuid: "openai-b", settings: { voice: "Rachel" } } }] } };
+        expect(customOverride(withTtsPolicy).tts_fallback).toEqual(withTtsPolicy.tts_fallback);
+        expect(specFromPatch(splitOverride(customOverride(withTtsPolicy)).patch).tts_fallback).toEqual(withTtsPolicy.tts_fallback);
+        const replaced = applyModelPatch(withTtsPolicy, { tts_fallback: { rules: [] } }, connections);
+        expect(replaced.tts_fallback).toEqual({ rules: [] });
     });
 
     it("knows when every service has an account", () => {

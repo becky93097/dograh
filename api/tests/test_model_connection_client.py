@@ -366,3 +366,36 @@ async def test_fallback_reference_guard_checks_tenant_and_prevents_archive(db_se
     )
     with pytest.raises(ModelCatalogConflict):
         await db_session.archive_provider_connection(org, backup.uuid)
+
+
+@pytest.mark.asyncio
+async def test_tts_fallback_reference_guard_checks_tenant_and_prevents_archive(
+    db_session,
+):
+    org = await create_org(db_session)
+    other = await create_org(db_session)
+    primary = await create_connection(db_session, org)
+    backup = await create_connection(db_session, org, "backup")
+    foreign = await create_connection(db_session, other)
+    config = pipeline(primary)
+    config["tts_fallback"] = {
+        "version": 1,
+        "rules": [
+            {
+                "condition": {"type": "error"},
+                "target": {"provider_connection_uuid": foreign.uuid, "settings": {}},
+            }
+        ],
+    }
+    with pytest.raises(ModelCatalogNotFound):
+        await db_session.create_named_model_configuration(
+            org, name="Foreign tts fallback", configuration=config
+        )
+    config["tts_fallback"]["rules"][0]["target"]["provider_connection_uuid"] = (
+        backup.uuid
+    )
+    await db_session.create_named_model_configuration(
+        org, name="TTS fallback", configuration=config
+    )
+    with pytest.raises(ModelCatalogConflict):
+        await db_session.archive_provider_connection(org, backup.uuid)
