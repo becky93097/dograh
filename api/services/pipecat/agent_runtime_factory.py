@@ -38,6 +38,7 @@ from api.services.pipecat.service_factory import (
     create_tts_service,
     get_llm_runtime_configuration,
     get_stt_settings_update,
+    get_tts_runtime_configuration,
 )
 from api.services.workflow.agent_runtime import AgentRuntime, new_visit_id
 from api.services.workflow.dto import ReactFlowDTO
@@ -287,8 +288,7 @@ class AgentRuntimeFactory:
         runtime.runtime_configuration = {
             "stt_provider": call_config.stt.provider,
             "stt_model": call_config.stt.model,
-            "tts_provider": user_config.tts.provider,
-            "tts_model": user_config.tts.model,
+            **get_tts_runtime_configuration(user_config),
             **get_llm_runtime_configuration(user_config),
         }
 
