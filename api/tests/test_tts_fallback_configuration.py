@@ -1,6 +1,7 @@
 """TTS voice-fallback policy validation, resolution, and factory wiring."""
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
@@ -112,6 +113,78 @@ def test_effective_configuration_rejects_dograh_primary():
 def test_effective_configuration_rejects_dograh_target():
     with pytest.raises(ValidationError, match="cannot be a fallback target"):
         tts_configuration(error_target={"provider": "dograh", "api_key": "managed"})
+
+
+def test_no_rules_returns_plain_tts():
+    from api.services.pipecat.service_factory import create_tts_service
+
+    with patch(
+        "api.services.pipecat.service_factory.create_single_tts_service"
+    ) as create:
+        primary = object()
+        create.return_value = primary
+        config = tts_configuration()
+        assert create_tts_service(config, None) is primary
+        create.assert_called_once()
+
+
+def test_rules_build_switcher():
+    from pipecat.tests.mock_tts_service import MockTTSService
+
+    from api.services.pipecat.fallback_tts import FallbackTTSService
+    from api.services.pipecat.service_factory import create_tts_service
+
+    backup = {"provider": "elevenlabs", "api_key": "b", "model": "m", "voice": "v"}
+    with patch(
+        "api.services.pipecat.service_factory.create_single_tts_service"
+    ) as create:
+        primary = MockTTSService(name="primary")
+        backup_service = MockTTSService(name="backup")
+        create.side_effect = [primary, backup_service]
+        config = tts_configuration(error_target=backup)
+        result = create_tts_service(config, None)
+    assert isinstance(result, FallbackTTSService)
+    assert create.call_count == 2
+    assert create.call_args_list[1].args[0].tts == config.tts_fallback.rules[0].target
+    assert create.call_args_list[1].kwargs["register_campaign_errors"] is False
+
+
+def test_broken_backup_returns_primary():
+    from api.services.pipecat.service_factory import create_tts_service
+
+    backup = {"provider": "elevenlabs", "api_key": "b", "model": "m", "voice": "v"}
+    with patch(
+        "api.services.pipecat.service_factory.create_single_tts_service"
+    ) as create:
+        primary = object()
+        create.side_effect = [primary, RuntimeError("bad")]
+        result = create_tts_service(tts_configuration(error_target=backup), None)
+    assert result is primary
+
+
+def test_runtime_metadata_omits_credentials_and_records_rules():
+    from api.services.pipecat.service_factory import get_tts_runtime_configuration
+
+    config = tts_configuration(
+        error_target={
+            "provider": "elevenlabs",
+            "api_key": "secret",
+            "model": "eleven_flash_v2_5",
+            "voice": "voice-id",
+        }
+    )
+    metadata = get_tts_runtime_configuration(config)
+    assert metadata["tts_fallback"]["rules"][0] == {
+        "condition": {"type": "error"},
+        "target": {
+            "provider": "elevenlabs",
+            "model": "eleven_flash_v2_5",
+            "voice": "voice-id",
+        },
+    }
+    assert "secret" not in str(metadata)
+    assert "api_key" not in metadata
+    assert "tts_voice" not in metadata
 
 
 def test_registry_has_no_provider_specific_tts_fallback_fields():

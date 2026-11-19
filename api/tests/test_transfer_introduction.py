@@ -20,7 +20,7 @@ from api.services.workflow import transfer_introduction as introduction
 @pytest.fixture(autouse=True)
 def tts_factory(monkeypatch):
     factory = Mock(return_value=object())
-    monkeypatch.setattr(introduction, "create_tts_service", factory)
+    monkeypatch.setattr(introduction, "create_single_tts_service", factory)
     return factory
 
 

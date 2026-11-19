@@ -165,6 +165,7 @@ def _report_service_factory_failures(
     def decorator(factory):
         @wraps(factory)
         def wrapped(*args, **kwargs):
+            register_campaign_errors = kwargs.pop("register_campaign_errors", True)
             provider = None
             if config_section:
                 user_config = args[0] if args else kwargs.get("user_config")
@@ -199,13 +200,14 @@ def _report_service_factory_failures(
                 provider=provider,
                 error_owner=error_owner,
             )
-            from api.services.campaign.circuit_breaker import (
-                register_campaign_provider_error_handler,
-            )
+            if register_campaign_errors:
+                from api.services.campaign.circuit_breaker import (
+                    register_campaign_provider_error_handler,
+                )
 
-            register_campaign_provider_error_handler(
-                service, provider=provider, source=source
-            )
+                register_campaign_provider_error_handler(
+                    service, provider=provider, source=source
+                )
             return service
 
         return wrapped
@@ -890,7 +892,7 @@ def create_stt_service(
 
 
 @_report_service_factory_failures(ErrorSource.TTS, config_section="tts")
-def create_tts_service(
+def create_single_tts_service(
     user_config,
     audio_config: "AudioConfig",
     correlation_id: str | None = None,
@@ -899,6 +901,10 @@ def create_tts_service(
     tts_cache_enabled: bool = False,
 ):
     """Create and return appropriate TTS service based on user configuration
+
+    Never wraps the service in a fallback switcher; see ``create_tts_service``.
+    The failure-reporting decorator also accepts ``register_campaign_errors=False``
+    to skip the campaign provider-error handler (used for an inactive backup).
 
     Args:
         user_config: User configuration containing TTS settings
@@ -1359,6 +1365,75 @@ def create_tts_service(
         raise HTTPException(
             status_code=400, detail=f"Invalid TTS provider {user_config.tts.provider}"
         )
+
+
+def get_tts_runtime_configuration(user_config) -> dict:
+    """Describe the resolved voice-fallback policy without credentials."""
+    tts = user_config.tts
+    configuration: dict[str, Any] = {
+        "tts_provider": tts.provider,
+        "tts_model": tts.model,
+    }
+    policy = getattr(user_config, "tts_fallback", None)
+    configuration["tts_fallback"] = {
+        "version": 1,
+        "rules": (
+            [
+                {
+                    "condition": rule.condition.model_dump(mode="json"),
+                    "target": {
+                        "provider": rule.target.provider,
+                        "model": rule.target.model,
+                        "voice": getattr(rule.target, "voice", None),
+                    },
+                }
+                for rule in policy.rules
+            ]
+            if policy
+            else []
+        ),
+    }
+    return configuration
+
+
+def create_tts_service(
+    user_config,
+    audio_config: "AudioConfig",
+    correlation_id: str | None = None,
+    *,
+    organization_id: int | None = None,
+    tts_cache_enabled: bool = False,
+):
+    """Create a TTS service, wrapping in a fallback switcher when configured."""
+    from api.services.pipecat.fallback_tts import FallbackTTSService
+
+    primary = create_single_tts_service(
+        user_config,
+        audio_config,
+        correlation_id,
+        organization_id=organization_id,
+        tts_cache_enabled=tts_cache_enabled,
+    )
+    policy = getattr(user_config, "tts_fallback", None)
+    if policy is None or not policy.rules:
+        return primary
+    target_config = user_config.model_copy(update={"tts": policy.rules[0].target})
+    try:
+        backup = create_single_tts_service(
+            target_config,
+            audio_config,
+            correlation_id,
+            organization_id=organization_id,
+            tts_cache_enabled=tts_cache_enabled,
+            register_campaign_errors=False,
+        )
+    except Exception as exc:
+        logger.warning(
+            f"TTS fallback backup could not be constructed ({type(exc).__name__}); "
+            "continuing with primary only"
+        )
+        return primary
+    return FallbackTTSService(primary, backup)
 
 
 def _migrate_deprecated_google_model(model: str) -> str:

@@ -138,6 +138,44 @@ async def test_model_factories_cover_stt_tts_and_fallback_children(monkeypatch):
     for processor in [stt, tts, *llm._services]:
         await processor._call_event_handler("on_error", ErrorFrame(error="HTTP 402"))
     assert pause.await_count == 4
+
+
+@pytest.mark.asyncio
+async def test_tts_fallback_backup_pauses_campaigns_only_once_it_is_active(
+    monkeypatch,
+):
+    from api.schemas.ai_model_configuration import EffectiveAIModelConfiguration
+    from api.services.configuration.model_connections import _build_service
+    from api.services.pipecat import service_factory
+    from api.services.pipecat.audio_config import AudioConfig
+    from api.services.pipecat.fallback_tts import FallbackTTSService
+
+    monkeypatch.setattr(module, "get_current_run_id", lambda: "7")
+    monkeypatch.setattr(module, "get_current_org_id", lambda: "1")
+    pause = AsyncMock()
+    monkeypatch.setattr(module.db_client, "pause_campaign_for_provider_error", pause)
+
+    def selection(role, provider):
+        return _build_service(role, provider, {"api_key": "test-key"}, {}, {})
+
+    config = EffectiveAIModelConfiguration(
+        llm=selection("llm", "openai"),
+        stt=selection("stt", "deepgram"),
+        tts=selection("tts", "deepgram"),
+        tts_fallback={
+            "version": 1,
+            "rules": [
+                {"condition": {"type": "error"}, "target": selection("tts", "deepgram")}
+            ],
+        },
+    )
+    tts = service_factory.create_tts_service(config, AudioConfig(16000, 16000))
+    assert isinstance(tts, FallbackTTSService)
+
+    await tts.backup._call_event_handler("on_error", ErrorFrame(error="HTTP 402"))
+    pause.assert_not_awaited()
+    await tts.primary._call_event_handler("on_error", ErrorFrame(error="HTTP 402"))
+    assert pause.await_count == 1
     assert {call.kwargs["service"] for call in pause.await_args_list} == {
         "stt",
         "tts",
